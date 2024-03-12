@@ -5,6 +5,8 @@ from discord.ext import commands
 import db
 import json
 import random
+import matplotlib.pyplot as plt
+import numpy as np
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -44,6 +46,8 @@ async def on_message(message):
         await show(message.author.id, message)
     elif message.content == "bb bot":
         await show_bot_board(message.author.id, message)
+    elif message.content == "bb calc":
+        await message.reply(json.dumps(await calc_percent()))
 
 async def send_record(message):
     user = db.get_user(message.author.id)
@@ -142,7 +146,8 @@ async def is_valid(start_row,start_col, end_row,end_col, board, left_to_place, m
     direction = 0
     if start_col == end_col:
         direction = 1
-    
+    if start_row < 0 or start_col< 0 or end_row < 0 or end_col < 0:
+        return False
     if start_index < 0 or start_index > 99:
         if message != None: await message.reply("Invalid starting position")
         return False
@@ -187,12 +192,12 @@ async def generate_board():
     while len(ship_len) > 0:
         row = random.randint(0,9)
         col = random.randint(0,9)
-        print(row, col)
         cur_ship = ship_len[len(ship_len) - 1]
+        options = []
+        """
         if await is_valid(row, col, row, col + cur_ship - 1, board, ship_len, None):
             index = row * 10 + col  
-            if col + cur_ship > 9:
-                continue
+            
             for pos in range(index, index + cur_ship):
                 board[str(pos)] = 0
             ship_len.pop()
@@ -202,8 +207,51 @@ async def generate_board():
             for pos in range(index, index + cur_ship * 10, 10):
                 board[str(pos)] = 0
             ship_len.pop()
+        """
+        if await is_valid(row, col, row, col + cur_ship - 1, board, ship_len, None):
+            options.append((row, col, 0))
+        if await is_valid(row, col, row + cur_ship - 1, col, board, ship_len, None):
+            options.append((row, col, 1))
+        if await is_valid(row - cur_ship + 1, col, row, col, board, ship_len, None):
+            options.append((row - cur_ship + 1, col, 1))
+        if await is_valid(row, col - cur_ship + 1, row, col, board, ship_len, None): 
+            options.append((row, col - cur_ship + 1, 0))
+        if len(options)== 0 : continue
+        res = random.choice(options)
+        options.clear()
+        if res[2] == 0:
+            index = res[0] * 10 + res[1]
+            for pos in range(index, index + cur_ship):
+                board[str(pos)] = 0
+            ship_len.pop()
+        else:
+            index = res[0] * 10 + res[1]
+            for pos in range(index, index + cur_ship * 10, 10):
+                board[str(pos)] = 0
+            ship_len.pop()
+
     return board
             
+async def calc_percent():
+    freq = [0] * 100
+    n = 30000
+    total = 0
+    for i in range(n):
+        board = await generate_board()
+        for i in range(100):
+            if board.get(str(i), None) != None:
+                freq[i] += 1
+                #total += 1
+    for i in range(100):
+        freq[i] = freq[i] / n
+    np_arr = np.array(freq)
+    np_arr = np.reshape(np_arr, (10,10))
+    print(np_arr)
+    plt.matshow(np_arr, cmap = plt.cm.Blues)
+    plt.show()
+    return [0,1]
+    
+
 
 
 if __name__ == "__main__":

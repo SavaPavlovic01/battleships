@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from discord.ext import commands
 import db
 import json
+import random
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -24,7 +25,11 @@ async def on_message(message):
     elif message.content == "bb start":
         await start_game(message.author.id, message)
     elif "bb shoot" in message.content:
-        shoot()
+        parsed = message.content.split("(")[1].split(')')[0].split(',')
+        if len(parsed) != 2:
+            await message.reply("Invalid arguments")
+            return
+        await shoot(int(parsed[0]), int(parsed[1]), message.author.id, message)
     elif message.content == "bb record":
         await send_record(message)
     elif "bb place" in message.content:
@@ -37,6 +42,8 @@ async def on_message(message):
         await place(int(parsed[0]), int(parsed[1]), int(parsed[2]), int(parsed[3]), message.author.id, message)
     elif message.content == 'bb board':
         await show(message.author.id, message)
+    elif message.content == "bb bot":
+        await show_bot_board(message.author.id, message)
 
 async def send_record(message):
     user = db.get_user(message.author.id)
@@ -52,11 +59,27 @@ async def start_game(id, message):
         return
     if db.get_user(id) == None:
         db.insert_user(id,"temp")
-    db.start_game(id)
+    bot_board = await generate_board()
+    db.start_game(id,bot_board)
     print("Working on it")
 
-def shoot():
-    print("Not yet implemented")
+async def shoot(row, col, id, message):
+    game = db.get_game(id)
+    if game == None:
+        await message.reply("You dont have an active game")
+        return
+    if row > 9 or col > 9 or row < 0 or col < 0:
+        await message.reply("Index out of bounds")
+        return
+    bot_board = json.loads(game['bot_board'])
+    index = row * 10 + col
+    if bot_board.get(str(index), None) != None:
+        await message.reply("Hit!")
+        bot_board[str(index)] = 1
+        game['bot_board'] = json.dumps(bot_board)
+        db.update_game(game)
+    else:
+        await message.reply("Miss!")
 
 async def place(start_row, start_col, end_row, end_col, id, message):
     game = db.get_game(id)
@@ -68,38 +91,19 @@ async def place(start_row, start_col, end_row, end_col, id, message):
     else:
         start_index = start_col + start_row * 10
         end_index = end_col + end_row * 10
+        direction = 0
+        if start_col == end_col:
+            direction = 1
+        else:
+            direction = 0
 
-        # check out of bounds
-        if start_index < 0 or start_index > 99:
-            await message.reply("Invalid starting position")
+        if not await is_valid(start_row, start_col, end_row, end_col, game['board'], game['left_to_place'], message):
             return
-        if end_index < 0 or end_index > 99:
-            await message.reply("Invalid end position")
-            return
-        
-        # check diagoal placement
-        if start_row != end_row and start_col != end_col:
-            await message.reply("Cant place ship diagonal")
-            return
-        
-        # check if that ship already placed and if valid len
         ship_len = abs(start_col - end_col) + abs(start_row - end_row) + 1
-        if ship_len > 5 or ship_len < 0:
-            await message.reply("Invalid ship lenght")
-            return
-        
-        if ship_len not in game["left_to_place"]:
-            await message.reply("You already placed that ship")
-            return
-        game["left_to_place"].remove(ship_len)
-
-        # check if space is free
-        keys = game['board'].keys()
-        for pos in range(start_index, end_index + 1):
-            if str(pos) in keys:
-                await message.reply("Cant place ship there")
-                return
-        for pos in range(start_index, end_index + 1):
+        game['left_to_place'].remove(ship_len)
+        step = 10
+        if direction == 0: step = 1
+        for pos in range(start_index, end_index + 1, step):
             game['board'][str(pos)] = 0
         game['board'] = json.dumps(game['board'])
         game['left_to_place'] = json.dumps(game['left_to_place'])
@@ -112,17 +116,94 @@ async def show(id, message):
     if game == None:
         await message.reply("You dont have an active game")
         return
+    await message.reply(board_string(game_board))
+
+async def show_bot_board(id, message):
+    game = db.get_game(id)
+    game_board = json.loads(game["bot_board"])
+    await message.reply(board_string(game_board))
+
+def board_string(game_board):
     board = ""
     for i in range(100):
         if i % 10 == 0 and i > 0 :
             board += "\n"
         if game_board.get(str(i), None) == None:
-            board += 'W'
+            board += 'E'
         elif game_board[str(i)] == 0:
             board += 'S'
         else:
             board += 'X'
-    await message.reply(board)
+    return board
+
+async def is_valid(start_row,start_col, end_row,end_col, board, left_to_place, message):
+    start_index = start_col + start_row * 10
+    end_index = end_col + end_row * 10
+    direction = 0
+    if start_col == end_col:
+        direction = 1
+    
+    if start_index < 0 or start_index > 99:
+        if message != None: await message.reply("Invalid starting position")
+        return False
+    if end_index < 0 or end_index > 99:
+        if message != None: await message.reply("Invalid end position")
+        return False
+        
+    # check diagoal placement
+    if start_row != end_row and start_col != end_col:
+        if message != None: await message.reply("Cant place ship diagonal")
+        return False
+        
+    # check if that ship already placed and if valid len
+    ship_len = abs(start_col - end_col) + abs(start_row - end_row) + 1
+    if direction == 0 and start_col + ship_len > 9:
+        if message != None: await message.reply("Cant place ship there")
+        return False
+    if ship_len > 5 or ship_len < 0:
+        if message != None: await message.reply("Invalid ship lenght")
+        return False
+        
+    if ship_len not in left_to_place:
+        if message != None: await message.reply("You already placed that ship")
+        return False
+
+    # check if space is free
+    keys = board.keys()
+    step = 10
+    if direction == 0: step = 1
+    
+    for pos in range(start_index, end_index + 1, step):
+
+        if str(pos) in keys:
+            if message != None: await message.reply("Cant place ship there")
+            return False
+    return True
+
+
+async def generate_board():
+    board = {}
+    ship_len = [2,3,3,4,5]
+    while len(ship_len) > 0:
+        row = random.randint(0,9)
+        col = random.randint(0,9)
+        print(row, col)
+        cur_ship = ship_len[len(ship_len) - 1]
+        if await is_valid(row, col, row, col + cur_ship - 1, board, ship_len, None):
+            index = row * 10 + col  
+            if col + cur_ship > 9:
+                continue
+            for pos in range(index, index + cur_ship):
+                board[str(pos)] = 0
+            ship_len.pop()
+            continue
+        if await is_valid(row, col, row + cur_ship - 1, col, board,ship_len, None):
+            index = row * 10 + col 
+            for pos in range(index, index + cur_ship * 10, 10):
+                board[str(pos)] = 0
+            ship_len.pop()
+    return board
+            
 
 
 if __name__ == "__main__":

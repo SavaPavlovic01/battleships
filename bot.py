@@ -47,7 +47,7 @@ async def on_message(message):
     elif message.content == "bb bot":
         await show_bot_board(message.author.id, message)
     elif message.content == "bb calc":
-        await message.reply(json.dumps(await calc_percent()))
+        await message.reply(json.dumps(calc_prob()))
 
 async def send_record(message):
     user = db.get_user(message.author.id)
@@ -251,7 +251,28 @@ async def calc_percent():
     plt.show()
     return [0,1]
     
-
+def calc_prob():
+    sizes = [2,3,3,4,5]
+    freq = [0] * 100
+    total = 0
+    while len(sizes) > 0:
+        cur_size = sizes[len(sizes) - 1]
+        sizes.pop()
+        for i in range(10):
+            for j in range(10):
+                if j + cur_size - 1 < 10:
+                    for pos in range(i * 10 + j, i * 10 + j + cur_size):
+                        freq[pos] += 1
+                        total += 1
+                if i + cur_size - 1 < 10:
+                    for pos in range(i*10 + j, i*10 + j + cur_size * 10, 10):
+                        freq[pos] += 1
+                        total += 1
+    np_arr = np.array(freq)
+    np_arr = np.reshape(np_arr, (10,10))
+    plt.matshow(np_arr, cmap = plt.cm.Blues)
+    plt.show()
+    return [0,1]
 
 
 if __name__ == "__main__":

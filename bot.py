@@ -47,7 +47,25 @@ async def on_message(message):
     elif message.content == "bb bot":
         await show_bot_board(message.author.id, message)
     elif message.content == "bb calc":
-        await message.reply(json.dumps(calc_prob()))
+        await message.reply("json.dumps(calc_prob())")
+    elif message.content == "bb test":
+        x = np.array(range(100))
+        y = np.array([0]*100)
+        moves = np.array([]) 
+        n= 5000
+        for i in range(n):
+            move = await play_game()
+            y[move] += 1
+            moves = np.append(moves, move)
+            print(str(i) + " out of " + str(n))
+        plt.bar(x,y)
+        plt.title("MEAN: " + str(np.mean(moves)) + "   MEDIAN: " + str(np.median(moves)) + "   STD: " + str(np.std(moves)) + 
+                  "\nN = " + str(n))
+        plt.savefig("RES.png")
+        
+        plt.close()
+        await message.reply("DONE")
+        return
 
 async def send_record(message):
     user = db.get_user(message.author.id)
@@ -189,48 +207,38 @@ async def is_valid(start_row,start_col, end_row,end_col, board, left_to_place, m
 async def generate_board():
     board = {}
     ship_len = [2,3,3,4,5]
+    ship_positions = {2:[], 3:[], 4:[], 5:[], 0:[]}
     while len(ship_len) > 0:
         row = random.randint(0,9)
         col = random.randint(0,9)
         cur_ship = ship_len[len(ship_len) - 1]
         options = []
-        """
-        if await is_valid(row, col, row, col + cur_ship - 1, board, ship_len, None):
-            index = row * 10 + col  
-            
-            for pos in range(index, index + cur_ship):
-                board[str(pos)] = 0
-            ship_len.pop()
-            continue
-        if await is_valid(row, col, row + cur_ship - 1, col, board,ship_len, None):
-            index = row * 10 + col 
-            for pos in range(index, index + cur_ship * 10, 10):
-                board[str(pos)] = 0
-            ship_len.pop()
-        """
+        
         if await is_valid(row, col, row, col + cur_ship - 1, board, ship_len, None):
             options.append((row, col, 0))
         if await is_valid(row, col, row + cur_ship - 1, col, board, ship_len, None):
             options.append((row, col, 1))
-        if await is_valid(row - cur_ship + 1, col, row, col, board, ship_len, None):
-            options.append((row - cur_ship + 1, col, 1))
-        if await is_valid(row, col - cur_ship + 1, row, col, board, ship_len, None): 
-            options.append((row, col - cur_ship + 1, 0))
         if len(options)== 0 : continue
         res = random.choice(options)
         options.clear()
         if res[2] == 0:
             index = res[0] * 10 + res[1]
+            cur_len = cur_ship
+            if cur_ship == 3 and len(ship_positions[3]) > 0: cur_len = 0
             for pos in range(index, index + cur_ship):
                 board[str(pos)] = 0
+                ship_positions[cur_len].append(pos)
             ship_len.pop()
         else:
             index = res[0] * 10 + res[1]
+            cur_len = cur_ship
+            if cur_ship == 3 and len(ship_positions[3]) > 0: cur_len = 0
             for pos in range(index, index + cur_ship * 10, 10):
                 board[str(pos)] = 0
+                ship_positions[cur_len].append(pos)
             ship_len.pop()
 
-    return board
+    return board, ship_positions
             
 async def calc_percent():
     freq = [0] * 100
@@ -251,29 +259,176 @@ async def calc_percent():
     plt.show()
     return [0,1]
     
-def calc_prob():
-    sizes = [2,3,3,4,5]
-    freq = [0] * 100
+def get_best_move_hunting(sizes, shot, name, verbose = False):
+    freq = []
+    for i in range(100):
+        freq.append([0, i])
     total = 0
     while len(sizes) > 0:
         cur_size = sizes[len(sizes) - 1]
+        if cur_size == 0: cur_size = 3
         sizes.pop()
         for i in range(10):
             for j in range(10):
                 if j + cur_size - 1 < 10:
+                    valid = True
                     for pos in range(i * 10 + j, i * 10 + j + cur_size):
-                        freq[pos] += 1
-                        total += 1
+                        if pos in shot:
+                            valid = False
+                            break
+                    if valid:
+                        for pos in range(i * 10 + j, i * 10 + j + cur_size):
+                            freq[pos][0] += 1
+                            total += 1
                 if i + cur_size - 1 < 10:
-                    for pos in range(i*10 + j, i*10 + j + cur_size * 10, 10):
-                        freq[pos] += 1
-                        total += 1
-    np_arr = np.array(freq)
-    np_arr = np.reshape(np_arr, (10,10))
-    plt.matshow(np_arr, cmap = plt.cm.Blues)
-    plt.show()
-    return [0,1]
+                    valid = True
+                    for pos in range(i * 10 + j, i * 10 + j + cur_size * 10, 10):
+                        if pos in shot:
+                            valid = False
+                            break
+                    if valid:
+                        for pos in range(i * 10 + j, i * 10 + j + cur_size * 10, 10):
+                            freq[pos][0] += 1
+                            total += 1    
+    if verbose:
+        graph_arr = []
+        for i in freq:
+            graph_arr.append(i[0])
+        np_arr = np.array(graph_arr)
+        np_arr = np.reshape(np_arr, (10,10))
+        plt.matshow(np_arr, cmap = plt.cm.Blues)
+        plt.title("Hunting")
+        plt.savefig(str(name) + ".png") 
+        plt.close()            
+    freq = sorted(freq, key=lambda x:x[0], reverse=True)
+    return freq[0][1]
 
+def get_best_move_targeting(sizes, shot, targets, name, verbose = False):
+    freq = []
+    for i in range(100):
+        freq.append([0, i])
+    total = 0
+    while len(sizes) > 0:
+        cur_size = sizes[len(sizes) - 1]
+        if cur_size == 0: cur_size = 3
+        sizes.pop()
+        for i in range(10):
+            for j in range(10):
+                if j + cur_size - 1 < 10:
+                    valid = True
+                    at_least_one = False
+                    for pos in range(i * 10 + j, i * 10 + j + cur_size):
+                        if pos in targets: 
+                            at_least_one = True
+                            continue
+                        if pos in shot:
+                            valid = False
+                            break
+                    if valid and at_least_one:
+                        for pos in range(i * 10 + j, i * 10 + j + cur_size):
+                            if pos in shot: continue
+                            freq[pos][0] += 1
+                            total += 1
+                if i + cur_size - 1 < 10:
+                    valid = True
+                    at_least_one = False
+                    for pos in range(i * 10 + j, i * 10 + j + cur_size * 10, 10):
+                        if pos in targets: 
+                            at_least_one = True
+                            continue
+                        if pos in shot:
+                            valid = False
+                            break
+                    if valid and at_least_one:
+                        for pos in range(i * 10 + j, i * 10 + j + cur_size * 10, 10):
+                            if pos in shot: continue
+                            freq[pos][0] += 1
+                            total += 1                    
+    if verbose:
+        graph_arr = []
+        for i in freq:
+            graph_arr.append(i[0])
+        np_arr = np.array(graph_arr)
+        np_arr = np.reshape(np_arr, (10,10))
+        plt.matshow(np_arr, cmap = plt.cm.Blues)
+        plt.title("Targeting")
+        plt.savefig(str(name) + ".png")
+        plt.close()
+    freq = sorted(freq, key=lambda x:x[0], reverse=True)
+    return freq[0][1]    
+
+def get_dead_ships(ship_pos):
+    ret = []
+    for key, val in ship_pos.items():
+        if len(val) == 0: ret.append(key)
+    return ret
+
+def get_alive_ships(ship_pos):
+    ret = []
+    for key, val in ship_pos.items():
+        if len(val) > 0: ret.append(key)
+    return ret
+
+def get_dead_ship_len(ship_pos):
+    ls = get_dead_ships(ship_pos)
+    cnt = 0
+    for num in ls:
+        add = num
+        if num == 0: add = 3
+        cnt += add
+    return cnt
+
+def hit_ship(ship_pos, pos):
+    for key, val in ship_pos.items():
+        if pos in val: val.remove(pos)
+
+async def play_game():
+    board, ship_pos = await generate_board()
+    #print(board_string(board))
+    #print(board)
+    #print(ship_pos)
+    shot = set()
+    hits = set()
+    targets = set()
+    move_cnt = 0
+    while len(get_alive_ships(ship_pos)) > 0:
+        #print(move_cnt,get_alive_ships(ship_pos))
+        if len(hits) == get_dead_ship_len(ship_pos):
+            move = get_best_move_hunting(get_alive_ships(ship_pos), shot, move_cnt)
+            #print(move)
+            move_cnt += 1
+            if board.get(str(move), None) != None:
+                hits.add(move)
+                shot.add(move)
+                targets.add(move)
+                hit_ship(ship_pos, move)
+            else:
+                shot.add(move)
+        else:
+            if len(targets) == 0: print("BUG")
+            move = get_best_move_targeting(get_alive_ships(ship_pos), shot, targets, move_cnt)
+            #print("targeting", move, "\ntargets:", targets)
+            move_cnt += 1
+            if board.get(str(move), None) != None:
+                hits.add(move)
+                shot.add(move)
+                hit_ship(ship_pos, move)
+                if len(hits) == get_dead_ship_len(ship_pos):
+                    targets.clear()
+                else:
+                    targets.add(move)
+            else:
+                shot.add(move)
+        if move_cnt == 80:
+            print("SHOT",shot)
+            print("BOARD", board)
+            print("HITS",hits)
+            print("SHIP_POS", ship_pos)
+            print("SHIPS_ALIVE", get_alive_ships(ship_pos))
+            print("DEAD_SHIPS", get_dead_ships(ship_pos))
+            print("TARGETS", targets)
+            break
+    return move_cnt
 
 if __name__ == "__main__":
     bot.run(TOKEN)

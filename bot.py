@@ -81,8 +81,8 @@ async def start_game(id, message):
         return
     if db.get_user(id) == None:
         db.insert_user(id,"temp")
-    bot_board = await generate_board()
-    db.start_game(id,bot_board)
+    bot_board, ship_pos = await generate_board()
+    db.start_game(id,bot_board, ship_pos)
     print("Working on it")
 
 async def shoot(row, col, id, message):
@@ -94,11 +94,14 @@ async def shoot(row, col, id, message):
         await message.reply("Index out of bounds")
         return
     bot_board = json.loads(game['bot_board'])
+    bot_ship_pos = game['bot_ship_pos']
     index = row * 10 + col
     if bot_board.get(str(index), None) != None:
         await message.reply("Hit!")
         bot_board[str(index)] = 1
         game['bot_board'] = json.dumps(bot_board)
+        hit_ship(bot_ship_pos, index)
+        game['bot_ship_pos'] = json.dumps(bot_ship_pos)
         db.update_game(game)
     else:
         await message.reply("Miss!")
@@ -107,6 +110,7 @@ async def place(start_row, start_col, end_row, end_col, id, message):
     game = db.get_game(id)
     game["left_to_place"] = json.loads(game['left_to_place'])
     game['board'] = json.loads(game['board'])
+    game['player_ship_pos'] = json.loads(game['player_ship_pos'])
     if game == None:
         await message.reply("You have no active game")
         return
@@ -125,11 +129,19 @@ async def place(start_row, start_col, end_row, end_col, id, message):
         game['left_to_place'].remove(ship_len)
         step = 10
         if direction == 0: step = 1
+        index = ship_len
+        if ship_len == 3 and len(game['player_ship_pos']["3"]) > 0: index = 0
         for pos in range(start_index, end_index + 1, step):
             game['board'][str(pos)] = 0
+            game['player_ship_pos'][str(index)].append(pos)
+        if len(game['left_to_place']) == 0:
+            _, moves = await play_game(game['board'], game['player_ship_pos'])
+            db.set_move(game['_id'], moves)
         game['board'] = json.dumps(game['board'])
         game['left_to_place'] = json.dumps(game['left_to_place'])
+        game['player_ship_pos'] = json.dumps(game['player_ship_pos'])
         db.update_game(game)
+        
         await message.reply('ok')
 
 async def show(id, message):
@@ -360,13 +372,13 @@ def get_best_move_targeting(sizes, shot, targets, name, verbose = False):
 def get_dead_ships(ship_pos):
     ret = []
     for key, val in ship_pos.items():
-        if len(val) == 0: ret.append(key)
+        if len(val) == 0: ret.append(int(key))
     return ret
 
 def get_alive_ships(ship_pos):
     ret = []
     for key, val in ship_pos.items():
-        if len(val) > 0: ret.append(key)
+        if len(val) > 0: ret.append(int(key))
     return ret
 
 def get_dead_ship_len(ship_pos):
@@ -382,20 +394,18 @@ def hit_ship(ship_pos, pos):
     for key, val in ship_pos.items():
         if pos in val: val.remove(pos)
 
-async def play_game():
-    board, ship_pos = await generate_board()
-    #print(board_string(board))
-    #print(board)
-    #print(ship_pos)
+async def play_game(board, ship_pos):
+    
+    moves = []
     shot = set()
     hits = set()
     targets = set()
     move_cnt = 0
     while len(get_alive_ships(ship_pos)) > 0:
-        #print(move_cnt,get_alive_ships(ship_pos))
+
         if len(hits) == get_dead_ship_len(ship_pos):
             move = get_best_move_hunting(get_alive_ships(ship_pos), shot, move_cnt)
-            #print(move)
+            moves.append(move)
             move_cnt += 1
             if board.get(str(move), None) != None:
                 hits.add(move)
@@ -407,7 +417,7 @@ async def play_game():
         else:
             if len(targets) == 0: print("BUG")
             move = get_best_move_targeting(get_alive_ships(ship_pos), shot, targets, move_cnt)
-            #print("targeting", move, "\ntargets:", targets)
+            moves.append(move)
             move_cnt += 1
             if board.get(str(move), None) != None:
                 hits.add(move)
@@ -419,16 +429,8 @@ async def play_game():
                     targets.add(move)
             else:
                 shot.add(move)
-        if move_cnt == 80:
-            print("SHOT",shot)
-            print("BOARD", board)
-            print("HITS",hits)
-            print("SHIP_POS", ship_pos)
-            print("SHIPS_ALIVE", get_alive_ships(ship_pos))
-            print("DEAD_SHIPS", get_dead_ships(ship_pos))
-            print("TARGETS", targets)
-            break
-    return move_cnt
+        
+    return move_cnt, moves
 
 if __name__ == "__main__":
     bot.run(TOKEN)

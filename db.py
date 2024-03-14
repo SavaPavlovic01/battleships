@@ -32,8 +32,14 @@ def update_game(game):
 
 # board
 # key is index (linearized), value is cell state (0 has ship/1 hit)
-def start_game(id_user, bot_board):
-    db["games"].insert_one({"_id":id_user, "state":"placing", "left_to_place":"[2,3,3,4,5]", "board":"{}", "bot_board":json.dumps(bot_board)})
+def start_game(id_user, bot_board, bot_ship_pos):
+    player_ship_pos = {2:[], 3:[], 4:[], 5:[], 0:[]}
+    db["games"].insert_one({"_id":id_user, "state":"placing", "left_to_place":"[2,3,3,4,5]", "board":"{}",
+                            "bot_board":json.dumps(bot_board), "bot_ship_pos":json.dumps(bot_ship_pos),
+                            "player_ship_pos":json.dumps(player_ship_pos)})
+
+def set_move(id_game, moves):
+    db['games'].update_one({'_id': id_game}, {"$set":{'bot_moves':json.dumps(moves)}})
 
 if __name__ =="__main__":
     make_db()

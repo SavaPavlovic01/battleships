@@ -54,7 +54,8 @@ async def on_message(message):
         moves = np.array([]) 
         n= 5000
         for i in range(n):
-            move = await play_game()
+            board, ship_pos = await generate_board()
+            move = await play_game(board, ship_pos)
             y[move] += 1
             moves = np.append(moves, move)
             print(str(i) + " out of " + str(n))
@@ -66,6 +67,7 @@ async def on_message(message):
         plt.close()
         await message.reply("DONE")
         return
+
 
 async def send_record(message):
     user = db.get_user(message.author.id)
@@ -404,7 +406,7 @@ async def play_game(board, ship_pos):
     while len(get_alive_ships(ship_pos)) > 0:
 
         if len(hits) == get_dead_ship_len(ship_pos):
-            move = get_best_move_hunting(get_alive_ships(ship_pos), shot, move_cnt)
+            move = get_best_move_hunting(get_alive_ships(ship_pos), shot, move_cnt, verbose = True)
             moves.append(move)
             move_cnt += 1
             if board.get(str(move), None) != None:
@@ -416,7 +418,7 @@ async def play_game(board, ship_pos):
                 shot.add(move)
         else:
             if len(targets) == 0: print("BUG")
-            move = get_best_move_targeting(get_alive_ships(ship_pos), shot, targets, move_cnt)
+            move = get_best_move_targeting(get_alive_ships(ship_pos), shot, targets, move_cnt, verbose = True)
             moves.append(move)
             move_cnt += 1
             if board.get(str(move), None) != None:
